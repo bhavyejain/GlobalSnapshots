@@ -59,7 +59,7 @@ class LocalSnapshot:
         if channel in self.channel_data:
             self.channel_data[channel].append(message)
         else:
-            self.channel_data[channel] = [message];
+            self.channel_data[channel] = [message]
 
 class GlobalSnapShot:
     
@@ -76,7 +76,7 @@ class GlobalSnapShot:
             if channel not in self.channel_data:
                 self.channel_data[channel] = []
             # this will have something like TOKEN sent from A to B
-            channel_data[channel] += data
+            self.channel_data[channel].append(data)
         if len(self.client_data)==CLIENT_COUNT:
             update_complete = True
         return update_complete
@@ -84,9 +84,9 @@ class GlobalSnapShot:
     def __str__(self):
         output = "Marker ID - {}\n".format(self.marker_id)
         output += "Client Store - \n"
-        output += "\n".join(["{} : {}".format(key, val) for key,val in client_data.items()])
+        output += "\n".join(["{} : {}".format(key, val) for key,val in self.client_data.items()])
         output += "\nChannel Store - \n"
-        output += "\n".join(["{} : {}".format(key, ", ".join([str(x) for x in val])) for key,val in channel_data.items()])
+        output += "\n".join(["{} : {}".format(key, ", ".join([str(x) for x in val])) for key,val in self.channel_data.items()])
         return output
 
 class ClientStore:
@@ -138,7 +138,7 @@ class ClientStore:
         return completed_marker
     
     def generate_message_for_snap_send(self, marker_id):
-        client = marker_id.split("->")[0]
+        client = marker_id.split(".")[0]
         if client == self.pid:
             self.global_snap_store[marker_id].add_info(self.pid, self.local_snap_store[marker_id])
             return None
