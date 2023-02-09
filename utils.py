@@ -1,5 +1,6 @@
-# PIDS - A, B, C, D, E
 from enum import Enum
+import random
+import pickle
  
 class Consts(Enum):
     PORT = "PORT"
@@ -10,14 +11,26 @@ class Consts(Enum):
     WITH_TOKEN = "WITH_TOKEN"
     WITHOUT_TOKEN = "WITHOUT_TOKEN"
 
-CLIENT_CONNECTIONS = {
-    "A": {
-        Consts.PORT: 45000,
-        Consts.CONNECTION: ["B", "C"]
-    }
-    # .......
-}
-CLIENT_COUNT = len(CLIENT_CONNECTIONS)
+# CLIENT_CONNECTIONS = {
+#     "A": {
+#         Consts.PORT: 45000,
+#         Consts.CONNECTION: ["B", "C"]
+#     }
+#     # .......
+# }
+# CLIENT_COUNT = len(CLIENT_CONNECTIONS)
+
+# Usage of pickle
+# convert obj to bytes - bytes = pickle.dumps(obj)
+# convert bytes to obj - obj = pickle.loads(bytes)
+
+# assuming options is a dict
+# prob is the probability is losing
+def select_channel(options, prob=0):
+    # either None or a key
+    if prob>0 and random.randint(0, 100)<prob*100:
+        return None
+    return random.choice(list(options.keys()))
 
 class Message:
     # message_type can be MARKER, TOKEN, SNAP
@@ -32,8 +45,10 @@ class Message:
         self.data = data
     
     def __str__(self):
-        if not self.data:
+        if message_type==Consts.TOKEN:
             return "{} sent from {} to {}".format(self.message_type.value, self.from_pid, self.to_pid)
+        elif message_type==Consts.MARKER:
+            return "{} - {} sent from {} to {}".format(self.message_type.value, self.marker_id, self.from_pid, self.to_pid)
         else:
             return "{} sent from {} with marker id as {} to {}".format(self.message_type.value, self.from_pid, self.marker_id, self.to_pid)
 
@@ -41,9 +56,10 @@ class LocalSnapshot:
     # class to track the local state of a client for a particular marker_id
     # state can be WITH_TOKEN or WITHOUT_TOKEN
     channel_data = {}
-    def __init__(self, state):
+    def __init__(self, state, channel):
         self.state = state
-    
+        self.channel_data[channel] = {}
+
     def add_info(self, channel, message):
         if channel in channel_data:
             channel_data[channel].append(message)
@@ -58,7 +74,7 @@ class GlobalSnapShot:
         self.marker_id = marker_id
     
     # this returns true if this is the last client to have been added 
-    def add_info(self, from_pid, snap=LocalSnapshot(Consts.WITHOUT_TOKEN)):
+    def add_info(self, from_pid, snap=LocalSnapshot(Consts.WITHOUT_TOKEN, None)):
         client_data[from_pid] = snap.state
         for channel, data in snap.channel_data.items():
             if channel not in channel_data:
@@ -73,6 +89,7 @@ class GlobalSnapShot:
         output = "Marker ID - {}\n".format(self.marker_id)
         output += "Client Store - \n"
         output += "\n".join(["{} : {}".format(key, val) for key,val in client_data.items()])
+        output += "\nChannel Store - \n"
         output += "\n".join(["{} : {}".format(key, ", ".join([str(x) for x in val])) for key,val in channel_data.items()])
         return output
 
@@ -102,15 +119,17 @@ class ClientStore:
         global_snap_store[new_marker] = None
         return new_marker
     
-    def track_marker(self, marker_id):
+    def track_marker(self, channel, marker_id):
         local_snap_store[marker_id] = None
         for channel in channel_marker_store:
             channel_marker_store[channel].add(marker_id)
+        channel_marker_store[channel].remove(marker_id)
         active_markers.add(marker_id)
     
     def update_marker_data(self, channel, message):
         for marker_id in channel_marker_store[channel]:
             local_snap_store[marker_id].add_info(channel, message)
+        return self.get_completed_local_snap_store()
     
     def get_completed_local_snap_store(self):
         curr_markers = set()
