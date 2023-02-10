@@ -65,7 +65,7 @@ def handle_cli(client, client_id):
                     with send_lock:
                         # record local state
                         print(f'Recording local state {local_state.value}')
-                        snap_store.start_a_local_snap_store(marker_id=message.marker_id, state=local_state)
+                        snap_store.start_a_local_snap_store(marker_id=marker_id, state=local_state)
                         # Propagate the marker
                         for client_name, connection in outgoing_connections.items():
                             prop_message = Message(message_type=Consts.MARKER, from_pid=my_client_name, to_pid=client_name, marker_id=marker_id)
