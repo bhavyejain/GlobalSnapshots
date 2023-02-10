@@ -53,7 +53,7 @@ def handle_cli(client, client_id):
     client.sendall(bytes(f'Client {my_client_name} connected', "utf-8"))
     while True:
         try:
-            message = client.recv(config.BUFF_SIZE).decode()
+            message = client.recv(1024).decode()
             if message:
                 print(f'{c.VIOLET}{client_id}{c.ENDC}: {message}')
                 if message == "TOKEN":
@@ -86,7 +86,7 @@ def handle_cli(client, client_id):
 
 def handle_incoming_snap(client, client_id):
     global snap_store
-    snap_raw = client.recv(config.BUFF_SIZE)
+    snap_raw = client.recv(config.SNAP_BUFF_SIZE)
     snap = pickle.loads(snap_raw) # object of class Message
     print(f'{c.BLUE}Received {snap.__str__()}{c.ENDC}')
     snap_store.update_global_snapshot(snap)
@@ -115,8 +115,8 @@ def handle_marker_message(conn_name, message):
                 temp_conn.connect((config.HOST, config.CLIENT_PORTS[client]))
                 temp_conn.sendall(bytes("SNAP", "utf-8"))
                 encoded_snap = pickle.dumps(snap)
-                print(f'{c.YELLOW}Sending {encoded_snap.__str__()} to {client}{c.ENDC}')
-                temp_conn.sendall(encoded_snap, "utf-8")
+                print(f'{c.YELLOW}Sending {snap.__str__()} to {client}{c.ENDC}')
+                temp_conn.sendall(encoded_snap)
                 temp_conn.close()
 
 def process_channel_messages(conn_name):
@@ -128,10 +128,10 @@ def process_channel_messages(conn_name):
             delta2 = round((config.DEF_DELAY - delta1), 2) if delta1 < config.DEF_DELAY else 0
             time.sleep(delta2) # deliver the message total DEF_DELAY time after receipt
             if msg[1].message_type == Consts.MARKER:
-                print(f'{c.BLUE}Received {c.ENDC}' + msg[1].__str__() + f'{c.BLUE}from {conn_name}{c.ENDC}')
+                print(f'{c.BLUE}Received {c.ENDC}' + msg[1].__str__() + f'{c.BLUE} from {conn_name}{c.ENDC}')
                 handle_marker_message(conn_name, msg[1])
             elif msg[1].message_type == Consts.TOKEN:
-                print(f'{c.BLUE}Received {c.ENDC}' + "TOKEN" + f'{c.BLUE}from {conn_name}{c.ENDC}')
+                print(f'{c.BLUE}Received {c.ENDC}' + "TOKEN" + f'{c.BLUE} from {conn_name}{c.ENDC}')
                 local_state = Consts.WITH_TOKEN
                 token_delivered_time = round(time.time(), 2)
                 snap_store.handle_incoming_channel_message(channel=conn_name, message=msg[1])
@@ -171,7 +171,6 @@ def establish_outgoing_connections():
             print(f"startup# {outgoing_connections[conn_name].recv(config.BUFF_SIZE).decode()}")
         except:
             print(f'{c.ERROR}startup# Failed to connect to {client_id}!{c.ENDC}')
-    print(outgoing_connections)
     print(f'================= STARTUP COMPLETE =================')
 
 def receive():
@@ -195,7 +194,6 @@ def receive():
                 target = handle_client
                 incoming_message_queues[conn_name] = Queue(0)
                 snap_store.add_incoming_connection(client_id)
-                print(incoming_connections)
 
         thread = threading.Thread(target=target, args=(client, client_id, ))
         thread.start()
