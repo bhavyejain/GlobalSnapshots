@@ -11,7 +11,7 @@ from queue import Queue
 import random
 
 my_client_name = ""
-send_lock = Lock()
+state_lock = Lock()
 incoming_connections = {}
 outgoing_connections = {}
 local_state = Consts.WITHOUT_TOKEN
@@ -29,7 +29,7 @@ def select_channel(options, prob=0):
     return random.choice(list(options.keys()))
 
 def handle_token():
-    global local_state
+    global local_state, state_lock
     while True:
         if local_state == Consts.WITHOUT_TOKEN:
             time.sleep(0.5)
@@ -38,7 +38,7 @@ def handle_token():
             delta2 = round((config.TOKEN_HOLD_TIME - delta1), 2) if delta1 < config.TOKEN_HOLD_TIME else 0
             time.sleep(delta2)
             channel = select_channel(outgoing_connections, token_drop_probability)
-            with send_lock:
+            with state_lock:
                 local_state = Consts.WITHOUT_TOKEN
                 if channel != None:
                     token = Message(message_type=Consts.TOKEN, from_pid=my_client_name, to_pid=channel)
@@ -49,7 +49,7 @@ def handle_token():
                     print(f"{c.FAILED}Token Dropped!{c.ENDC}")
 
 def handle_cli(client, client_id):
-    global local_state, snap_store, token_drop_probability
+    global local_state, snap_store, token_drop_probability, state_lock
     client.sendall(bytes(f'Client {my_client_name} connected', "utf-8"))
     while True:
         try:
@@ -62,7 +62,7 @@ def handle_cli(client, client_id):
                 elif message == "SNAPSHOT":
                     marker_id = snap_store.initiate_self_global_snapshot()
                     print(f'{c.VIOLET}--- Initiate Global Snapshot With Marker {marker_id} ---{c.ENDC}')
-                    with send_lock:
+                    with state_lock:
                         # record local state
                         print(f'Recording local state {local_state.value}')
                         snap_store.start_a_local_snap_store(marker_id=marker_id, state=local_state)
@@ -94,10 +94,10 @@ def handle_incoming_snap(client, client_id):
     client.close()
 
 def handle_marker_message(conn_name, message):
-    global snap_store, local_state
+    global snap_store, local_state, state_lock
     if snap_store.is_a_new_marker(message.marker_id):
         print(f'Starting new local snapshot for marker {message.marker_id}...')
-        with send_lock:
+        with state_lock:
             snap_store.start_a_local_snap_store(marker_id=message.marker_id, state=local_state)
             # Propagate the marker
             print(f'Propagating marker {message.marker_id}...')
@@ -122,7 +122,7 @@ def handle_marker_message(conn_name, message):
             temp_conn.close()
 
 def process_channel_messages(conn_name):
-    global local_state, incoming_message_queues, snap_store, token_delivered_time
+    global local_state, incoming_message_queues, snap_store, token_delivered_time, state_lock
     while True:
         if not incoming_message_queues[conn_name].empty():
             msg = incoming_message_queues[conn_name].get()
@@ -133,10 +133,11 @@ def process_channel_messages(conn_name):
                 print(f'{c.BLUE}Received {c.ENDC}' + msg[1].__str__() + f'{c.BLUE} from {conn_name}{c.ENDC}')
                 handle_marker_message(conn_name, msg[1])
             elif msg[1].message_type == Consts.TOKEN:
-                print(f'{c.BLUE}Received {c.ENDC}' + "TOKEN" + f'{c.BLUE} from {conn_name}{c.ENDC}')
-                local_state = Consts.WITH_TOKEN
-                token_delivered_time = round(time.time(), 2)
-                snap_store.handle_incoming_channel_message(channel=conn_name, message=msg[1])
+                with state_lock:
+                    print(f'{c.BLUE}Received {c.ENDC}' + "TOKEN" + f'{c.BLUE} from {conn_name}{c.ENDC}')
+                    local_state = Consts.WITH_TOKEN
+                    token_delivered_time = round(time.time(), 2)
+                    snap_store.handle_incoming_channel_message(channel=conn_name, message=msg[1])
         else:
             time.sleep(1)
 
