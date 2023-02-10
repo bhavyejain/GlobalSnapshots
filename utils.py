@@ -165,7 +165,7 @@ class ClientStore:
             if is_snap_complete:
                 print(str(self.global_snap_store[message.marker_id]))
             return client, None
-        message = Message(Consts.SNAP, self.pid, client, data=self.local_snap_store[marker_id])
+        message = Message(Consts.SNAP, from_pid=self.pid, to_pid=client, marker_id=marker_id, data=self.local_snap_store[marker_id])
         return client, message
 
     # call this when someone sends you their local snap

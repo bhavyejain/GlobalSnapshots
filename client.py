@@ -67,6 +67,7 @@ def handle_cli(client, client_id):
                         print(f'Recording local state {local_state.value}')
                         snap_store.start_a_local_snap_store(marker_id=marker_id, state=local_state)
                         # Propagate the marker
+                        print(f'Propagating marker {marker_id}...')
                         for client_name, connection in outgoing_connections.items():
                             prop_message = Message(message_type=Consts.MARKER, from_pid=my_client_name, to_pid=client_name, marker_id=marker_id)
                             print(f'{c.YELLOW}Sending {prop_message.__str__()} to {client_name}{c.ENDC}')
@@ -100,6 +101,7 @@ def handle_marker_message(conn_name, message):
         with send_lock:
             snap_store.start_a_local_snap_store(marker_id=message.marker_id, state=local_state)
             # Propagate the marker
+            print(f'Propagating marker {message.marker_id}...')
             for client_name, connection in outgoing_connections.items():
                 prop_message = Message(message_type=Consts.MARKER, from_pid=my_client_name, to_pid=client_name, marker_id=message.marker_id)
                 print(f'{c.YELLOW}Sending {prop_message.__str__()} to {client_name}{c.ENDC}')
@@ -111,10 +113,12 @@ def handle_marker_message(conn_name, message):
             print(f'Completed local snapshot for marker {marker_id}!')
             client, snap = snap_store.generate_message_for_snap_send(marker_id=marker_id)
             if snap != None:
+                # Send the snapshot to requesting client
                 temp_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 temp_conn.connect((config.HOST, config.CLIENT_PORTS[client]))
                 temp_conn.sendall(bytes("SNAP", "utf-8"))
                 encoded_snap = pickle.dumps(snap)
+                time.sleep(0.5)
                 print(f'{c.YELLOW}Sending {snap.__str__()} to {client}{c.ENDC}')
                 temp_conn.sendall(encoded_snap)
                 temp_conn.close()
@@ -180,7 +184,7 @@ def receive():
         client, addr = mySocket.accept()
         client.setblocking(True)
         # A/B/C/D/E
-        client_id = client.recv(config.BUFF_SIZE).decode()
+        client_id = client.recv(1024).decode()
         print(f"receive# Connecting with {client_id}...")
         
         if client_id == "CLI":
