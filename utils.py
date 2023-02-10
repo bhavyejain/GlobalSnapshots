@@ -56,11 +56,13 @@ class LocalSnapshot:
     # class to track the local state of a client for a particular marker_id
     # state can be WITH_TOKEN or WITHOUT_TOKEN
     
-    def __init__(self, state):
+    def __init__(self, marker_id, state):
         self.state = state
+        self.marker_id = marker_id
         self.channel_data = {}
 
     def add_info(self, channel, message):
+        print("Adding entry to channel - {} as for marker - {}".format(channel, self.marker_id))
         self.channel_data[channel].append(message)
 
 class GlobalSnapShot:
@@ -72,25 +74,26 @@ class GlobalSnapShot:
         self.update_complete = False
     
     # this returns true if this is the last client to have been added 
-    def add_info(self, from_pid, snap=LocalSnapshot(Consts.WITHOUT_TOKEN)):
+    def add_info(self, from_pid, snap):
+        print("Inserting local snapshot sent from {} to global snapshot - {}".format(from_pid, self.marker_id))
         self.client_data[from_pid] = snap.state
         for channel, data in snap.channel_data.items():
             if channel not in self.channel_data:
                 self.channel_data[channel] = []
             # this will have something like TOKEN sent from A to B
-            self.channel_data[channel].append(data)
+            self.channel_data[channel] += data
         if len(self.client_data)==CLIENT_COUNT:
-            update_complete = True
-        return update_complete
+            self.update_complete = True
+        return self.update_complete
     
     def __str__(self):
-        output = f"===== {Colors.SELECTED}GLOBAL SNAPSHOT{Colors.ENDC} ====="
+        output = f"===== {Colors.SELECTED}GLOBAL SNAPSHOT{Colors.ENDC} =====\n"
         output += f"{Colors.BLUE}Marker ID: {Colors.ENDC} {self.marker_id}\n"
         output += f"{Colors.BLUE}Client(s) State:{Colors.ENDC} \n"
-        output += "\n".join(["{} : {}".format(key, val) for key,val in self.client_data.items()])
+        output += "\n".join(["{} : {}".format(key, val.value) for key,val in self.client_data.items()])
         output += f"\n{Colors.BLUE}Channel(s) State:{Colors.ENDC} \n"
         output += "\n".join(["{} : {}".format(key, ", ".join([str(x) for x in val])) for key,val in self.channel_data.items()])
-        output += f"=========================="
+        output += f"\n==========================\n"
         return output
 
 class ClientStore:
@@ -108,52 +111,60 @@ class ClientStore:
     def add_incoming_connection(self, from_pid):
         # add the entry to marker store so that client track which marker data to track from that channel
         # this gives something like B->A
-        # key = "{}->{}".format(from_pid, self.pid)
-        key = from_pid
+        key = "{}->{}".format(from_pid, self.pid)
         self.channel_marker_store[key] = set()
+        print("Adding an incoming channel with label - {}".format(key))
         return key
     
     def initiate_self_global_snapshot(self):
         new_marker = "{}.{}".format(self.pid, len(self.global_snap_store)+1)
         self.local_snap_store[new_marker] = None
-        self.global_snap_store[new_marker] = None
+        self.global_snap_store[new_marker] = GlobalSnapShot(new_marker)
+        print("Initiating global snapshot from my client with marker - {}".format(new_marker))
         return new_marker
     
     def is_a_new_marker(self, marker_id):
         return marker_id not in self.local_snap_store
     
     # call this if is_a_new_marker returns true
-    def track_new_marker(self, channel, marker_id):
+    def _track_new_marker(self, marker_id):
         for in_channel in self.channel_marker_store:
             self.channel_marker_store[in_channel].add(marker_id)
-        self.channel_marker_store[channel].remove(marker_id)
         self.active_markers.add(marker_id)
     
     # call after initiate_global_snapshot and track_new_marker
     def start_a_local_snap_store(self, marker_id, state):
-        self.local_snap_store[marker_id] = LocalSnapshot(state)
+        print("Intiating a local snapshot for marker - {}".format(marker_id))
+        self.local_snap_store[marker_id] = LocalSnapshot(marker_id, state)
         for channel in self.channel_marker_store:
             # makes sure empty transactions are feeded
-            self.local_snap_store[channel] = list()
+            self.local_snap_store[marker_id].channel_data[channel] = list()
+        self._track_new_marker(marker_id)
     
     # call this if is_a_new_marker returns false or for a token message
     def handle_incoming_channel_message(self, channel, message):
+        if len(self.active_markers) == 0:
+            # Nothing to process
+            return None
         # for MARKER messages which are not lingering broadcasts
         if message.message_type == Consts.MARKER and message.marker_id in self.channel_marker_store[channel]:
+            print("MARKER - {} received from {} on channel - {}".format(message.marker_id, message.from_pid, channel))
             self.channel_marker_store[channel].remove(message.marker_id)
-            return self.get_completed_local_snap_store() # None / if any marker has completed the execution
         for marker_id in self.channel_marker_store[channel]:
             self.local_snap_store[marker_id].add_info(channel, message)
-        return None
-    
+        return self.get_completed_local_snap_store() # None / if any marker has completed the execution
+
+    # checks if all incoming channels have completed receiving marker
     def get_completed_local_snap_store(self):
         curr_markers = set()
-        for channel in self.channel_marker_store:
-            curr_markers.union(self.channel_marker_store[channel])
+        for channel, markers in self.channel_marker_store.items():
+            curr_markers = curr_markers.union(markers)
         completed_markers = self.active_markers.difference(curr_markers)
         # this is always going to be max 1 in our case
         completed_marker = list(completed_markers)[0] if len(completed_markers) else None
         self.active_markers.remove(completed_marker) if completed_marker else None
+        if completed_marker:
+            print("Local snapstore - {} is completed".format(completed_marker))
         return completed_marker
     
     # call this method when handle_incoming_channel_message returns a marker
@@ -161,10 +172,13 @@ class ClientStore:
         client = marker_id.split(".")[0]
         # if the client is you, just update global store and send None
         if client == self.pid:
+            print("Local snapshot - {} completed is for myself only!!".format(marker_id))
             is_snap_complete = self.global_snap_store[marker_id].add_info(self.pid, self.local_snap_store[marker_id])
             if is_snap_complete:
+                print("Global snapshot process for {} completed".format(marker_id))
                 print(str(self.global_snap_store[message.marker_id]))
             return client, None
+        print("Local snapshot - {} completed and being sent to {}".format(marker_id, client))
         message = Message(Consts.SNAP, from_pid=self.pid, to_pid=client, marker_id=marker_id, data=self.local_snap_store[marker_id])
         return client, message
 

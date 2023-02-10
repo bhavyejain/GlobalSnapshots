@@ -96,7 +96,6 @@ def handle_incoming_snap(client, client_id):
 def handle_marker_message(conn_name, message):
     global snap_store, local_state
     if snap_store.is_a_new_marker(message.marker_id):
-        snap_store.track_new_marker(channel=conn_name, marker_id=message.marker_id)
         print(f'Starting new local snapshot for marker {message.marker_id}...')
         with send_lock:
             snap_store.start_a_local_snap_store(marker_id=message.marker_id, state=local_state)
@@ -107,21 +106,20 @@ def handle_marker_message(conn_name, message):
                 print(f'{c.YELLOW}Sending {prop_message.__str__()} to {client_name}{c.ENDC}')
                 encoded_prop_message = pickle.dumps(prop_message)
                 connection.sendall(encoded_prop_message)
-    else:
-        marker_id = snap_store.handle_incoming_channel_message(channel=conn_name, message=message)
-        if marker_id != None:
-            print(f'Completed local snapshot for marker {marker_id}!')
-            client, snap = snap_store.generate_message_for_snap_send(marker_id=marker_id)
-            if snap != None:
-                # Send the snapshot to requesting client
-                temp_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                temp_conn.connect((config.HOST, config.CLIENT_PORTS[client]))
-                temp_conn.sendall(bytes("SNAP", "utf-8"))
-                encoded_snap = pickle.dumps(snap)
-                time.sleep(0.5)
-                print(f'{c.YELLOW}Sending {snap.__str__()} to {client}{c.ENDC}')
-                temp_conn.sendall(encoded_snap)
-                temp_conn.close()
+    marker_id = snap_store.handle_incoming_channel_message(channel=conn_name, message=message)
+    if marker_id != None:
+        print(f'Completed local snapshot for marker {marker_id}!')
+        client, snap = snap_store.generate_message_for_snap_send(marker_id=marker_id)
+        if snap != None:
+            # Send the snapshot to requesting client
+            temp_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            temp_conn.connect((config.HOST, config.CLIENT_PORTS[client]))
+            temp_conn.sendall(bytes("SNAP", "utf-8"))
+            encoded_snap = pickle.dumps(snap)
+            time.sleep(0.5)
+            print(f'{c.YELLOW}Sending {snap.__str__()} to {client}{c.ENDC}')
+            temp_conn.sendall(encoded_snap)
+            temp_conn.close()
 
 def process_channel_messages(conn_name):
     global local_state, incoming_message_queues, snap_store, token_delivered_time
@@ -142,10 +140,9 @@ def process_channel_messages(conn_name):
         else:
             time.sleep(1)
 
-def handle_client(client, client_id):
+def handle_client(client, conn_name):
     global incoming_message_queues
     client.sendall(bytes(f'Client {my_client_name} connected', "utf-8"))
-    conn_name = f'{client_id}'
     thread = threading.Thread(target=process_channel_messages, args=(conn_name, ))
     thread.start()
     while True:
@@ -155,11 +152,11 @@ def handle_client(client, client_id):
                 message = pickle.loads(raw_message)
                 incoming_message_queues[conn_name].put((round(time.time(), 2), message))
             else:
-                print(f'handle_client# Closing connection to {client_id}')
+                print(f'handle_client# Closing connection {conn_name}')
                 client.close()
                 break
         except Exception as e:
-            print(f'{c.ERROR}handle_client# Exception thrown in {client_id} thread!{c.ENDC}')
+            print(f'{c.ERROR}handle_client# Exception thrown in {conn_name} thread!{c.ENDC}')
             print(f'Exception: {e.__str__()}, Traceback: {e.__traceback__()}')
 
 def establish_outgoing_connections():
@@ -188,19 +185,19 @@ def receive():
         print(f"receive# Connecting with {client_id}...")
         
         if client_id == "CLI":
-            target = handle_cli
+            thread = threading.Thread(target=handle_cli, args=(client, client_id, ))
+            thread.start()
         else:
             conn_name = f'{client_id}'
             if conn_name == "SNAP":
-                target = handle_incoming_snap
+                thread = threading.Thread(target=handle_incoming_snap, args=(client, client_id, ))
+                thread.start()
             else:
-                incoming_connections[conn_name] = client
-                target = handle_client
-                incoming_message_queues[conn_name] = Queue(0)
-                snap_store.add_incoming_connection(client_id)
-
-        thread = threading.Thread(target=target, args=(client, client_id, ))
-        thread.start()
+                channel_name = snap_store.add_incoming_connection(client_id)
+                incoming_connections[channel_name] = client
+                incoming_message_queues[channel_name] = Queue(0)
+                thread = threading.Thread(target=handle_client, args=(client, channel_name, ))
+                thread.start()
 
 if __name__ == "__main__":
 
