@@ -11,15 +11,12 @@ from utils_ import Colors as c
 subprocess.call(['chmod', '+x', 'startup.sh'])
 
 pwd = os.getcwd()
-print(f"================= {c.SELECTED}STARTING LACHAIN{c.ENDC} =================")
+print(f"================= {c.SELECTED}STARTING GLOBAL SNAPSHOT SIMULATOR{c.ENDC} =================")
 
-print("Starting bank server...")
-applescript.tell.app("Terminal",f'do script "{pwd}/startup.sh server"')
-time.sleep(0.5)
 for client in config.CLIENT_PORTS.keys():
     print(f'Starting {client}...')
-    applescript.tell.app("Terminal",f'do script "{pwd}/startup.sh client {client}"')
-    time.sleep(0.5)
+    applescript.tell.app("Terminal",f'do script "{pwd}/startup.sh {client}"')
+    time.sleep(0.2)
 
 client_name = "CLI"
 
@@ -45,23 +42,19 @@ def execute_command(seg_cmd):
     
     elif op_type == "wait":
         input(f"Press {c.BLINK}ENTER{c.ENDC} to continue simulation...")
-
-    elif op_type == "balance":
-        app = seg_cmd[1]
-        if app == "server":
-            connections[app].sendall(bytes("BALANCE", "utf-8"))
-        elif app == "client":
-            connections[seg_cmd[2]].sendall(bytes("BALANCE", "utf-8"))
-
-    elif op_type == "transfer":
-        from_c = seg_cmd[1]
-        to_c = seg_cmd[2]
-        amt = seg_cmd[3]
-        connections[from_c].sendall(bytes(f'TRANSFER {to_c} {amt}', "utf-8"))
-
-    elif op_type == "bchain":
+    
+    elif op_type == "token":
         client = seg_cmd[1]
-        connections[client].sendall(bytes("BLOCKCHAIN", "utf-8"))
+        connections[client].sendall(bytes("TOKEN", "utf-8"))
+    
+    elif op_type == "snapshot":
+        client = seg_cmd[1]
+        connections[client].sendall(bytes("SNAPSHOT", "utf-8"))
+    
+    elif op_type == "drop":
+        client = seg_cmd[1]
+        probability = seg_cmd[2]
+        connections[client].sendall(bytes(f"DROP {probability}", "utf-8"))
     
     elif op_type == "delay":
         t = float(seg_cmd[1])
@@ -104,7 +97,7 @@ def send():
                 execute_command(seg_cmd)
 
 def connect_to(name, port):
-    print(f'startup# Connecting to {name}...')
+    print(f'startup# Connecting to client {name}...')
     connections[name] = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     connections[name].setblocking(True)
     connections[name].connect((config.HOST, port))
@@ -114,8 +107,6 @@ def connect_to(name, port):
     thread.start()
 
 if __name__ == "__main__":
-
-    connect_to("server", config.BANK_PORT)
 
     for client, port in config.CLIENT_PORTS.items():
         connect_to(client, port)
