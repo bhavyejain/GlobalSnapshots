@@ -1,15 +1,28 @@
 from enum import Enum
-import random
-import pickle
 import config
- 
+
+class Colors:
+    VIOLET = '\033[94m'
+    BLUE = '\033[36m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'    # yellow
+    ERROR = '\033[91m'   # red
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    GRAY = '\033[90m'
+    SUCCESS = '\033[42m'
+    FAILED = '\033[41m'
+    SELECTED = '\033[7m'
+    BLINK = '\033[5m'
+
 class Consts(Enum):
     PORT = "PORT"
     CONNECTION = "CONNECTION"
     MARKER = "MARKER" # for sending marker
     TOKEN = "TOKEN" # for sending token
     SNAP = "SNAP" # for sending snapshot from client
-    WITH_TOKEN = "WITH_TOKEN"
+    WITH_TOKEN = f"{Colors.SUCCESS}TOKEN{Colors.ENDC}"
     WITHOUT_TOKEN = "WITHOUT_TOKEN"
 
 CLIENT_COUNT = len(config.CLIENT_PORTS)
@@ -17,15 +30,6 @@ CLIENT_COUNT = len(config.CLIENT_PORTS)
 # Usage of pickle
 # convert obj to bytes - bytes = pickle.dumps(obj)
 # convert bytes to obj - obj = pickle.loads(bytes)
-
-# assuming options is a dict
-# prob is the probability is losing
-def select_channel(options, prob=0):
-    # either None or a key
-    prob = int(prob)
-    if prob>0 and random.randint(0, 100)<prob:
-        return None
-    return random.choice(list(options.keys()))
 
 class Message:
     # message_type can be MARKER, TOKEN, SNAP
@@ -41,11 +45,12 @@ class Message:
     
     def __str__(self):
         if self.message_type==Consts.TOKEN:
-            return "{} sent from {} to {}".format(self.message_type.value, self.from_pid, self.to_pid)
+            # return "{} sent from {} to {}".format(self.message_type.value, self.from_pid, self.to_pid)
+            return f"{Colors.SUCCESS}TOKEN{Colors.ENDC}"
         elif self.message_type==Consts.MARKER:
-            return "{} - {} sent from {} to {}".format(self.message_type.value, self.marker_id, self.from_pid, self.to_pid)
+            return f"{self.message_type.value} : {self.marker_id}"
         else:
-            return "{} sent from {} with marker id as {} to {}".format(self.message_type.value, self.from_pid, self.marker_id, self.to_pid)
+            return "{} from {} with marker id {}".format(self.message_type.value, self.from_pid, self.marker_id, self.to_pid)
 
 class LocalSnapshot:
     # class to track the local state of a client for a particular marker_id
@@ -79,11 +84,13 @@ class GlobalSnapShot:
         return update_complete
     
     def __str__(self):
-        output = "Marker ID - {}\n".format(self.marker_id)
-        output += "Client Store - \n"
+        output = f"===== {Colors.SELECTED}GLOBAL SNAPSHOT{Colors.ENDC} ====="
+        output += f"{Colors.BLUE}Marker ID: {Colors.ENDC} {self.marker_id}\n"
+        output += f"{Colors.BLUE}Client(s) State:{Colors.ENDC} \n"
         output += "\n".join(["{} : {}".format(key, val) for key,val in self.client_data.items()])
-        output += "\nChannel Store - \n"
+        output += f"\n{Colors.BLUE}Channel(s) State:{Colors.ENDC} \n"
         output += "\n".join(["{} : {}".format(key, ", ".join([str(x) for x in val])) for key,val in self.channel_data.items()])
+        output += f"=========================="
         return output
 
 class ClientStore:
@@ -116,8 +123,8 @@ class ClientStore:
     
     # call this if is_a_new_marker returns true
     def track_new_marker(self, channel, marker_id):
-        for channel in self.channel_marker_store:
-            self.channel_marker_store[channel].add(marker_id)
+        for in_channel in self.channel_marker_store:
+            self.channel_marker_store[in_channel].add(marker_id)
         self.channel_marker_store[channel].remove(marker_id)
         self.active_markers.add(marker_id)
     
@@ -130,11 +137,13 @@ class ClientStore:
     
     # call this if is_a_new_marker returns false or for a token message
     def handle_incoming_channel_message(self, channel, message):
-        if message.message_type == Consts.MARKER:
+        # for MARKER messages which are not lingering broadcasts
+        if message.message_type == Consts.MARKER and message.marker_id in self.channel_marker_store[channel]:
             self.channel_marker_store[channel].remove(message.marker_id)
             return self.get_completed_local_snap_store() # None / if any marker has completed the execution
         for marker_id in self.channel_marker_store[channel]:
             self.local_snap_store[marker_id].add_info(channel, message)
+        return None
     
     def get_completed_local_snap_store(self):
         curr_markers = set()
@@ -146,18 +155,20 @@ class ClientStore:
         self.active_markers.remove(completed_marker) if completed_marker else None
         return completed_marker
     
-    # call this method when update_incoming_channel returns a marker
+    # call this method when handle_incoming_channel_message returns a marker
     def generate_message_for_snap_send(self, marker_id):
         client = marker_id.split(".")[0]
         # if the client is you, just update global store and send None
         if client == self.pid:
-            self.global_snap_store[marker_id].add_info(self.pid, self.local_snap_store[marker_id])
+            is_snap_complete = self.global_snap_store[marker_id].add_info(self.pid, self.local_snap_store[marker_id])
+            if is_snap_complete:
+                print(str(self.global_snap_store[message.marker_id]))
             return client, None
         message = Message(Consts.SNAP, self.pid, client, data=self.local_snap_store[marker_id])
         return client, message
 
     # call this when someone sends you their local snap
-    def update_global_snapshot(self, client, message):
+    def update_global_snapshot(self, message):
         is_snap_complete = self.global_snap_store[message.marker_id].add_info(message.from_pid, message.data)
         # Once completed, just print the global snapshot
         if is_snap_complete:
