@@ -12,6 +12,8 @@ import random
 
 my_client_name = ""
 state_lock = Lock()
+store_lock = Lock()
+snap_merge_lock = Lock()
 incoming_connections = {}
 outgoing_connections = {}
 local_state = Consts.WITHOUT_TOKEN
@@ -49,7 +51,7 @@ def handle_token():
                     print(f"{c.FAILED}Token Dropped!{c.ENDC}")
 
 def handle_cli(client, client_id):
-    global local_state, snap_store, token_drop_probability, state_lock
+    global local_state, snap_store, token_drop_probability, state_lock, store_lock
     client.sendall(bytes(f'Client {my_client_name} connected', "utf-8"))
     while True:
         try:
@@ -65,7 +67,8 @@ def handle_cli(client, client_id):
                     with state_lock:
                         # record local state
                         print(f'Recording local state {local_state.value}')
-                        snap_store.start_a_local_snap_store(marker_id=marker_id, state=local_state)
+                        with store_lock:
+                            snap_store.start_a_local_snap_store(marker_id=marker_id, state=local_state)
                         # Propagate the marker
                         print(f'Propagating marker {marker_id}...')
                         for client_name, connection in outgoing_connections.items():
@@ -86,15 +89,16 @@ def handle_cli(client, client_id):
             print(f'Exception: {e.__str__()}, Traceback: {e.__traceback__()}')
 
 def handle_incoming_snap(client, client_id):
-    global snap_store
+    global snap_store, snap_merge_lock
     snap_raw = client.recv(config.SNAP_BUFF_SIZE)
     snap = pickle.loads(snap_raw) # object of class Message
     print(f'{c.BLUE}Received {snap.__str__()}{c.ENDC}')
-    snap_store.update_global_snapshot(snap)
+    with snap_merge_lock:
+        snap_store.update_global_snapshot(snap)
     client.close()
 
 def handle_marker_message(conn_name, message):
-    global snap_store, local_state, state_lock
+    global snap_store, local_state, state_lock, store_lock
     if snap_store.is_a_new_marker(message.marker_id):
         print(f'Starting new local snapshot for marker {message.marker_id}...')
         with state_lock:
@@ -106,7 +110,8 @@ def handle_marker_message(conn_name, message):
                 print(f'{c.YELLOW}Sending {prop_message.__str__()} to {client_name}{c.ENDC}')
                 encoded_prop_message = pickle.dumps(prop_message)
                 connection.sendall(encoded_prop_message)
-    marker_id = snap_store.handle_incoming_channel_message(channel=conn_name, message=message)
+    with store_lock:
+        marker_id = snap_store.handle_incoming_channel_message(channel=conn_name, message=message)
     if marker_id != None:
         print(f'Completed local snapshot for marker {marker_id}!')
         client, snap = snap_store.generate_message_for_snap_send(marker_id=marker_id)
@@ -122,7 +127,7 @@ def handle_marker_message(conn_name, message):
             temp_conn.close()
 
 def process_channel_messages(conn_name):
-    global local_state, incoming_message_queues, snap_store, token_delivered_time, state_lock
+    global local_state, incoming_message_queues, snap_store, token_delivered_time, state_lock, store_lock
     while True:
         if not incoming_message_queues[conn_name].empty():
             msg = incoming_message_queues[conn_name].get()
@@ -137,7 +142,8 @@ def process_channel_messages(conn_name):
                     print(f'{c.BLUE}Received {c.ENDC}' + "TOKEN" + f'{c.BLUE} from {conn_name}{c.ENDC}')
                     local_state = Consts.WITH_TOKEN
                     token_delivered_time = round(time.time(), 2)
-                    snap_store.handle_incoming_channel_message(channel=conn_name, message=msg[1])
+                    with store_lock:
+                        snap_store.handle_incoming_channel_message(channel=conn_name, message=msg[1])
         else:
             time.sleep(1)
 
