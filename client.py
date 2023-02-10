@@ -29,6 +29,7 @@ def select_channel(options, prob=0):
     return random.choice(list(options.keys()))
 
 def handle_token():
+    global local_state
     while True:
         if local_state == Consts.WITHOUT_TOKEN:
             time.sleep(0.5)
@@ -41,9 +42,9 @@ def handle_token():
                 local_state = Consts.WITHOUT_TOKEN
                 if channel != None:
                     token = Message(message_type=Consts.TOKEN, from_pid=my_client_name, to_pid=channel)
-                    print(f'{c.YELLOW}Sending {token.__str__()} to {channel}{c.ENDC}')
+                    print(f'{c.YELLOW}Sending TOKEN to {channel}{c.ENDC}')
                     encoded_token = pickle.dumps(token)
-                    outgoing_connections[channel].sendall(bytes(encoded_token, "utf-8"))
+                    outgoing_connections[channel].sendall(encoded_token)
                 else:
                     print(f"{c.FAILED}Token Dropped!{c.ENDC}")
 
@@ -65,12 +66,12 @@ def handle_cli(client, client_id):
                         # record local state
                         print(f'Recording local state {local_state.value}')
                         snap_store.start_a_local_snap_store(marker_id=message.marker_id, state=local_state)
-                        # start broadcast
+                        # Propagate the marker
                         for client_name, connection in outgoing_connections.items():
                             prop_message = Message(message_type=Consts.MARKER, from_pid=my_client_name, to_pid=client_name, marker_id=marker_id)
                             print(f'{c.YELLOW}Sending {prop_message.__str__()} to {client_name}{c.ENDC}')
                             encoded_prop_message = pickle.dumps(prop_message)
-                            connection.sendall(bytes(encoded_prop_message, "utf-8"))
+                            connection.sendall(encoded_prop_message)
                 elif message.startswith("DROP"):
                     cmd = message.split()
                     token_drop_probability = int(cmd[1])
@@ -85,7 +86,7 @@ def handle_cli(client, client_id):
 
 def handle_incoming_snap(client, client_id):
     global snap_store
-    snap_raw = client.recv(config.BUFF_SIZE).decode()
+    snap_raw = client.recv(config.BUFF_SIZE)
     snap = pickle.loads(snap_raw) # object of class Message
     print(f'{c.BLUE}Received {snap.__str__()}{c.ENDC}')
     snap_store.update_global_snapshot(snap)
@@ -103,7 +104,7 @@ def handle_marker_message(conn_name, message):
                 prop_message = Message(message_type=Consts.MARKER, from_pid=my_client_name, to_pid=client_name, marker_id=message.marker_id)
                 print(f'{c.YELLOW}Sending {prop_message.__str__()} to {client_name}{c.ENDC}')
                 encoded_prop_message = pickle.dumps(prop_message)
-                connection.sendall(bytes(encoded_prop_message, "utf-8"))
+                connection.sendall(encoded_prop_message)
     else:
         marker_id = snap_store.handle_incoming_channel_message(channel=conn_name, message=message)
         if marker_id != None:
@@ -115,7 +116,7 @@ def handle_marker_message(conn_name, message):
                 temp_conn.sendall(bytes("SNAP", "utf-8"))
                 encoded_snap = pickle.dumps(snap)
                 print(f'{c.YELLOW}Sending {encoded_snap.__str__()} to {client}{c.ENDC}')
-                temp_conn.sendall(bytes(encoded_snap, "utf-8"))
+                temp_conn.sendall(encoded_snap, "utf-8")
                 temp_conn.close()
 
 def process_channel_messages(conn_name):
@@ -126,10 +127,11 @@ def process_channel_messages(conn_name):
             delta1 = round((time.time() -  msg[0]), 2)
             delta2 = round((config.DEF_DELAY - delta1), 2) if delta1 < config.DEF_DELAY else 0
             time.sleep(delta2) # deliver the message total DEF_DELAY time after receipt
-            print(f'{c.BLUE}Received {c.ENDC}' + msg[1].__str__() + f'{c.BLUE}from {conn_name}{c.ENDC}')
             if msg[1].message_type == Consts.MARKER:
+                print(f'{c.BLUE}Received {c.ENDC}' + msg[1].__str__() + f'{c.BLUE}from {conn_name}{c.ENDC}')
                 handle_marker_message(conn_name, msg[1])
             elif msg[1].message_type == Consts.TOKEN:
+                print(f'{c.BLUE}Received {c.ENDC}' + "TOKEN" + f'{c.BLUE}from {conn_name}{c.ENDC}')
                 local_state = Consts.WITH_TOKEN
                 token_delivered_time = round(time.time(), 2)
                 snap_store.handle_incoming_channel_message(channel=conn_name, message=msg[1])
@@ -144,7 +146,7 @@ def handle_client(client, client_id):
     thread.start()
     while True:
         try:
-            raw_message = client.recv(config.BUFF_SIZE).decode()
+            raw_message = client.recv(config.BUFF_SIZE)
             if raw_message:
                 message = pickle.loads(raw_message)
                 incoming_message_queues[conn_name].put((round(time.time(), 2), message))
@@ -169,6 +171,7 @@ def establish_outgoing_connections():
             print(f"startup# {outgoing_connections[conn_name].recv(config.BUFF_SIZE).decode()}")
         except:
             print(f'{c.ERROR}startup# Failed to connect to {client_id}!{c.ENDC}')
+    print(outgoing_connections)
     print(f'================= STARTUP COMPLETE =================')
 
 def receive():
@@ -177,6 +180,7 @@ def receive():
         # Accept Connection
         client, addr = mySocket.accept()
         client.setblocking(True)
+        # A/B/C/D/E
         client_id = client.recv(config.BUFF_SIZE).decode()
         print(f"receive# Connecting with {client_id}...")
         
@@ -191,6 +195,7 @@ def receive():
                 target = handle_client
                 incoming_message_queues[conn_name] = Queue(0)
                 snap_store.add_incoming_connection(client_id)
+                print(incoming_connections)
 
         thread = threading.Thread(target=target, args=(client, client_id, ))
         thread.start()

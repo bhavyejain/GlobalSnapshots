@@ -108,7 +108,8 @@ class ClientStore:
     def add_incoming_connection(self, from_pid):
         # add the entry to marker store so that client track which marker data to track from that channel
         # this gives something like B->A
-        key = "{}->{}".format(from_pid, self.pid)
+        # key = "{}->{}".format(from_pid, self.pid)
+        key = from_pid
         self.channel_marker_store[key] = set()
         return key
     
