@@ -116,6 +116,7 @@ def handle_marker_message(conn_name, message):
                 encoded_snap = pickle.dumps(snap)
                 print(f'{c.YELLOW}Sending {encoded_snap.__str__()} to {client}{c.ENDC}')
                 temp_conn.sendall(bytes(encoded_snap, "utf-8"))
+                temp_conn.close()
 
 def process_channel_messages(conn_name):
     global local_state, incoming_message_queues, snap_store, token_delivered_time
