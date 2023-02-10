@@ -6,7 +6,7 @@ import socket
 import config
 import threading
 import sys
-from utils_ import Colors as c
+from utils import Colors as c
 
 subprocess.call(['chmod', '+x', 'startup.sh'])
 

@@ -72,7 +72,7 @@ class GlobalSnapShot:
         self.update_complete = False
     
     # this returns true if this is the last client to have been added 
-    def add_info(self, from_pid, snap=LocalSnapshot(Consts.WITHOUT_TOKEN, None)):
+    def add_info(self, from_pid, snap=LocalSnapshot(Consts.WITHOUT_TOKEN)):
         self.client_data[from_pid] = snap.state
         for channel, data in snap.channel_data.items():
             if channel not in self.channel_data:
